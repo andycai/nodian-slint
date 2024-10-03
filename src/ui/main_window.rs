@@ -1,203 +1,105 @@
-use slint::{ComponentHandle, Model, VecModel, SharedString, Weak};
-use std::rc::Rc;
+use slint::{self, ComponentHandle, Model, ModelRc, SharedString, Weak};
+use std::sync::{Arc, Mutex};
+use std::rc::Rc;  // 添加这一行
 use crate::features::markdown_editor::{MarkdownEditor, OpenFile};
 use pulldown_cmark::{Parser, html};
 
-slint::include_modules!();
-
-slint::slint! {
-    import { Button, VerticalBox, HorizontalBox, GroupBox, LineEdit, TextEdit } from "std-widgets.slint";
-
-    struct OpenFileData {
-        path: string,
-        is_modified: bool,
-    }
-
-    component SidebarButton inherits Button {
-        width: 40px;
-        height: 40px;
-    }
-
-    component FileTab inherits Rectangle {
-        callback clicked();
-        in property <string> file-name;
-        in property <bool> is-modified;
-
-        width: 120px;
-        height: 30px;
-        background: lightgray;
-
-        HorizontalLayout {
-            Text {
-                text: file-name + (is-modified ? "*" : "");
-            }
-        }
-
-        TouchArea {
-            clicked => {
-                root.clicked();
-            }
-        }
-    }
-
-    global Callbacks {
-        pure callback create_file(string);
-        pure callback open_file(string);
-        pure callback save_file();
-        pure callback update_content(string);
-        pure callback request_preview() -> string;
-    }
-
-    export component AppWindow inherits Window {
-        title: "Nodian";
-        width: 1024px;
-        height: 768px;
-
-        in property <[string]> file_tree: [];
-        in property <[OpenFileData]> open_files: [];
-
-        HorizontalBox {
-            VerticalBox {
-                width: 50px;
-                SidebarButton { text: "📝"; }
-                SidebarButton { text: "📅"; }
-                SidebarButton { text: "🔧"; }
-                SidebarButton { text: "⏱️"; }
-                SidebarButton { text: "🔒"; }
-                SidebarButton { text: "📋"; }
-            }
-            VerticalBox {
-                HorizontalBox {
-                    height: 30px;
-                    LineEdit {
-                        placeholder-text: "Enter file name";
-                        edited => {
-                            Callbacks.create_file(self.text);
-                            self.text = "";
-                        }
-                    }
-                    Button {
-                        text: "Save";
-                        clicked => { Callbacks.save_file(); }
-                    }
-                }
-                HorizontalBox {
-                    for file in open_files: FileTab {
-                        file-name: file.path;
-                        is-modified: file.is_modified;
-                        clicked => {
-                            Callbacks.open_file(file.path);
-                        }
-                    }
-                }
-                HorizontalBox {
-                    VerticalBox {
-                        width: 200px;
-                        for file in file_tree: Text {
-                            text: file;
-                            TouchArea {
-                                clicked => { Callbacks.open_file(file); }
-                            }
-                        }
-                    }
-                    TextEdit {
-                        // edited => {
-                        //     let text = self.text;
-                        //     if let Some((x, y)) = text.parse::<(f32, f32)>().ok() {
-                        //         // 根据你的逻辑选择一个值，或者计算一个单一的值
-                        //         let value = x; // 或者 let value = (x + y) / 2.0;
-                        //         Callbacks.update_content(value.to_string());
-                        //     }
-                        // }
-                        edited => { Callbacks.update_content(self.text); }
-                    }
-                    Rectangle {
-                        width: 50%;
-                        background: white;
-                        Text {
-                            text: Callbacks.request_preview();
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+// 修改这一行
+use crate::ui::{AppWindow, Callbacks, OpenFileData};
 
 pub struct MainWindow {
-    window: Weak<AppWindow>,
-    markdown_editor: Rc<std::cell::RefCell<MarkdownEditor>>,
+    window: Arc<AppWindow>,  // 改为 Arc<AppWindow>
+    markdown_editor: Arc<Mutex<MarkdownEditor>>,
 }
 
 impl MainWindow {
     pub fn new() -> Result<Self, slint::PlatformError> {
-        let window = AppWindow::new()?;
-        let markdown_editor = Rc::new(std::cell::RefCell::new(MarkdownEditor::new()));
+        let window = Arc::new(AppWindow::new()?);  // 使用 Arc::new
+        let markdown_editor = Arc::new(Mutex::new(MarkdownEditor::new()));
 
         let md_editor = markdown_editor.clone();
-        window.global::<Callbacks>().on_create_file(move |name| {
-            if let Err(e) = md_editor.borrow_mut().create_file(&name) {
+        let window_clone = window.clone();
+        window.global::<Callbacks>().on_create_file(move |name: SharedString| {
+            if let Err(e) = md_editor.lock().unwrap().create_file(&name) {
                 eprintln!("Failed to create file: {}", e);
             }
         });
 
         let md_editor = markdown_editor.clone();
-        window.global::<Callbacks>().on_open_file(move |path| {
-            if let Err(e) = md_editor.borrow_mut().open_file(std::path::Path::new(path.as_str())) {
+        let window_clone = window.clone();
+        window.global::<Callbacks>().on_open_file(move |path: SharedString| {
+            if let Err(e) = md_editor.lock().unwrap().open_file(std::path::Path::new(path.as_str())) {
                 eprintln!("Failed to open file: {}", e);
             }
         });
 
         let md_editor = markdown_editor.clone();
         window.global::<Callbacks>().on_save_file(move || {
-            if let Err(e) = md_editor.borrow_mut().save_file() {
+            if let Err(e) = md_editor.lock().unwrap().save_file() {
                 eprintln!("Failed to save file: {}", e);
             }
         });
 
         let md_editor = markdown_editor.clone();
-        window.global::<Callbacks>().on_update_content(move |content| {
-            md_editor.borrow_mut().update_content(content.to_string());
+        window.global::<Callbacks>().on_update_content(move |content: SharedString| {
+            md_editor.lock().unwrap().update_content(content.to_string());
         });
 
         let md_editor = markdown_editor.clone();
-        window.global::<Callbacks>().on_request_preview(move || {
-            let content = md_editor.borrow().get_content();
-            let parser = Parser::new(content);
-            let mut html_output = String::new();
-            html::push_html(&mut html_output, parser);
-            html_output.into()
+        let weak_window = window_clone.as_weak();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let content = {
+                    let editor = md_editor.lock().unwrap();
+                    editor.get_content().to_string() // 克隆内容
+                }; // 锁在这里被释放
+                let parser = Parser::new(&content);
+                let mut html_output = String::new();
+                html::push_html(&mut html_output, parser);
+                weak_window.upgrade_in_event_loop(move |handle| {
+                    handle.set_preview_content(html_output.into());
+                }).ok();
+            }
         });
 
-        Ok(Self { window: window.as_weak(), markdown_editor })
+        println!("MainWindow created successfully");
+        Ok(Self { window, markdown_editor })  // 不再需要 as_weak()
     }
 
     pub fn run(&self) -> Result<(), slint::PlatformError> {
+        println!("Updating file tree");
         self.update_file_tree();
+        println!("Updating open files");
         self.update_open_files();
-        slint::run_event_loop()
+        println!("Attempting to show window");
+        
+        self.window.show()?;
+        println!("Window shown, starting event loop");
+        slint::run_event_loop()?;
+        
+        println!("Event loop finished");
+        Ok(())
     }
 
     fn update_file_tree(&self) {
-        let files = self.markdown_editor.borrow().get_file_tree();
-        let file_model: Rc<VecModel<SharedString>> = Rc::new(VecModel::from(
+        let files = self.markdown_editor.lock().unwrap().get_file_tree();
+        let file_model: Rc<slint::VecModel<SharedString>> = Rc::new(slint::VecModel::from(
             files.into_iter().map(|p| p.to_string_lossy().to_string().into()).collect::<Vec<SharedString>>()
         ));
-        if let Some(window) = self.window.upgrade() {
-            window.set_file_tree(file_model.into());
-        }
+        self.window.set_file_tree(ModelRc::new(file_model));
     }
 
     fn update_open_files(&self) {
-        let open_files = self.markdown_editor.borrow().get_open_files();
-        let open_files_model: Rc<VecModel<OpenFileData>> = Rc::new(VecModel::from(
-            open_files.iter().map(|f| OpenFileData {
-                path: f.path.to_string_lossy().to_string().into(),
-                is_modified: f.is_modified,
-            }).collect::<Vec<OpenFileData>>()
-        ));
-        if let Some(window) = self.window.upgrade() {
-            window.set_open_files(open_files_model.into());
-        }
+        let markdown_editor = self.markdown_editor.lock().unwrap();
+        let open_files = markdown_editor.get_open_files();
+        let open_files_vec: Vec<OpenFileData> = open_files.iter().map(|f| OpenFileData {
+            path: f.path.to_string_lossy().to_string().into(),
+            is_modified: f.is_modified,
+        }).collect();
+        drop(markdown_editor); // 释放锁
+
+        let open_files_model: Rc<slint::VecModel<OpenFileData>> = Rc::new(slint::VecModel::from(open_files_vec));
+        self.window.set_open_files(ModelRc::new(open_files_model));
     }
 }
