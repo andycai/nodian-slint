@@ -2,11 +2,13 @@ use slint::{self, ComponentHandle, Model, ModelRc, SharedString, Weak, VecModel}
 use std::sync::{Arc, Mutex};
 use std::rc::Rc;
 use tokio::sync::mpsc;
-use crate::features::markdown_editor::{MarkdownEditor, OpenFile};
+use crate::features::markdown_editor::MarkdownEditor;
 use pulldown_cmark::{Parser, html};
 use crate::ui::{AppWindow, Callbacks, OpenFileData};
 use std::path::{PathBuf, Path};
 use std::fs;
+use std::borrow::Cow;
+use tokio::time::{sleep, Duration};
 
 pub struct MainWindow {
     window: Rc<AppWindow>,
@@ -31,6 +33,9 @@ impl MainWindow {
         let markdown_editor = Arc::new(Mutex::new(MarkdownEditor::new()));
         let (tx, rx) = mpsc::channel(100);
 
+        // 设置初始的 editor_content
+        window.set_editor_content("".into());
+
         let tx_clone = tx.clone();
         window.global::<Callbacks>().on_create_file(move |name: SharedString| {
             let tx = tx_clone.clone();
@@ -44,7 +49,7 @@ impl MainWindow {
         window.global::<Callbacks>().on_open_file(move |path: SharedString| {
             let tx = tx_clone.clone();
             let path = path.to_string();
-            println!("on_open_file called with path: {}", path); // Add this line for debugging
+            println!("on_open_file called with path: {}", path); // 保留这行调试输出
             tokio::spawn(async move {
                 tx.send(UIMessage::OpenFile(path)).await.unwrap();
             });
@@ -113,30 +118,34 @@ impl MainWindow {
             open_files.iter().map(|f| OpenFileData {
                 path: f.path.to_string_lossy().to_string().into(),
                 is_modified: f.is_modified,
-                is_active: Some(&f.path) == current_file,
+                is_active: current_file.map(|cf| cf == f.path.as_path()).unwrap_or(false),
             }).collect::<Vec<OpenFileData>>()
         };
         tx.send(UIMessage::UpdateOpenFiles(open_files_data)).await.unwrap();
 
         while let Some(msg) = rx.recv().await {
+            let window = window.clone(); // Clone the Weak<AppWindow> here
             match msg {
                 UIMessage::UpdateFileTree(files) => {
+                    let files_clone = files.clone();
                     window.upgrade_in_event_loop(move |handle| {
                         let file_model = Rc::new(VecModel::from(
-                            files.into_iter().map(SharedString::from).collect::<Vec<SharedString>>()
+                            files_clone.into_iter().map(SharedString::from).collect::<Vec<SharedString>>()
                         ));
                         handle.set_file_tree(ModelRc::new(file_model));
                     }).ok();
                 },
                 UIMessage::UpdateOpenFiles(open_files) => {
+                    let open_files_clone = open_files.clone();
                     window.upgrade_in_event_loop(move |handle| {
-                        let open_files_model = Rc::new(VecModel::from(open_files));
+                        let open_files_model = Rc::new(VecModel::from(open_files_clone));
                         handle.set_open_files(ModelRc::new(open_files_model));
                     }).ok();
                 },
                 UIMessage::UpdatePreview(html) => {
+                    let html_clone = html.clone();
                     window.upgrade_in_event_loop(move |handle| {
-                        handle.set_preview_content(html.into());
+                        handle.set_preview_content(html_clone.into());
                     }).ok();
                 },
                 UIMessage::CreateFile(name) => {
@@ -150,22 +159,42 @@ impl MainWindow {
                 },
                 UIMessage::OpenFile(path) => {
                     println!("Attempting to open file: {}", path);
-                    let relative_path = Path::new(&path).strip_prefix("nodian").unwrap_or(Path::new(&path));
+                    let full_path = if Path::new(&path).is_absolute() {
+                        PathBuf::from(&path)
+                    } else {
+                        Path::new("nodian").join(&path)
+                    };
+                    println!("Full path: {:?}", full_path);
                     let content = {
                         let mut editor = markdown_editor.lock().unwrap();
-                        if let Err(e) = editor.open_file(relative_path) {
-                            eprintln!("Failed to open file: {}", e);
-                            continue;
+                        match editor.open_file(&full_path) {
+                            Ok(()) => {
+                                println!("File opened successfully");
+                                editor.get_content().to_string()
+                            },
+                            Err(e) => {
+                                eprintln!("Failed to open file: {}", e);
+                                String::new()
+                            }
                         }
-                        println!("File opened successfully");
-                        editor.get_content().to_string()
                     };
                     
                     // Update the text edit with the file content
                     let content_clone = content.clone();
                     window.upgrade_in_event_loop(move |handle| {
                         handle.set_editor_content(content_clone.into());
+                        // println!("Editor content updated: {}", content_clone);
+                        // Force UI update
+                        handle.window().request_redraw();
                     }).ok();
+                    
+                    // 添加一个小延迟后再次触发 UI 更新
+                    tokio::spawn(async move {
+                        sleep(Duration::from_millis(50)).await;
+                        window.upgrade_in_event_loop(|handle| {
+                            handle.window().request_redraw();
+                        }).ok();
+                    });
                     
                     // Update preview
                     let parser = Parser::new(&content);
@@ -179,9 +208,13 @@ impl MainWindow {
                         let open_files = editor.get_open_files();
                         let current_file = editor.get_current_file();
                         open_files.iter().map(|f| OpenFileData {
-                            path: f.path.strip_prefix(&editor.get_root_dir()).unwrap_or(&f.path).to_string_lossy().to_string().into(),
+                            path: f.path.strip_prefix(&editor.get_root_dir())
+                                .unwrap_or(&f.path)
+                                .to_string_lossy()
+                                .to_string()
+                                .into(),
                             is_modified: f.is_modified,
-                            is_active: Some(&f.path) == current_file,
+                            is_active: current_file.map(|cf| cf == f.path.as_path()).unwrap_or(false),
                         }).collect()
                     };
                     tx.send(UIMessage::UpdateOpenFiles(open_files_data)).await.unwrap();
@@ -200,9 +233,13 @@ impl MainWindow {
                         let open_files = editor.get_open_files();
                         let current_file = editor.get_current_file();
                         open_files.iter().map(|f| OpenFileData {
-                            path: f.path.strip_prefix(&editor.get_root_dir()).unwrap_or(&f.path).to_string_lossy().to_string().into(),
+                            path: f.path.strip_prefix(&editor.get_root_dir())
+                                .unwrap_or(&f.path)
+                                .to_string_lossy()
+                                .to_string()
+                                .into(),
                             is_modified: f.is_modified,
-                            is_active: Some(&f.path) == current_file,
+                            is_active: current_file.map(|cf| cf == f.path.as_path()).unwrap_or(false),
                         }).collect()
                     };
                     tx.send(UIMessage::UpdateOpenFiles(open_files_data)).await.unwrap();
@@ -218,8 +255,9 @@ impl MainWindow {
                     }
                 },
                 UIMessage::UpdateEditorContent(content) => {
+                    let content_clone = content.clone();
                     window.upgrade_in_event_loop(move |handle| {
-                        handle.set_editor_content(content.into());
+                        handle.set_editor_content(content_clone.into());
                     }).ok();
                 },
             }
