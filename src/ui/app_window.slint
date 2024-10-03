@@ -1,27 +1,118 @@
-import { Button, VerticalBox, HorizontalBox, GroupBox, LineEdit, TextEdit } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, GroupBox, LineEdit, TextEdit, ScrollView } from "std-widgets.slint";
 
 export struct OpenFileData {
     path: string,
     is_modified: bool,
+    is_active: bool,
 }
 
-component SidebarButton inherits Button {
+component SidebarButton inherits Rectangle {
     width: 40px;
     height: 40px;
+    background: #f0f0f0;
+    border-radius: 4px;
+
+    in property <string> icon;
+    property <bool> is-hovered: false;
+    property <bool> is-pressed: false;
+
+    Text {
+        text: root.icon;
+        font-size: 18px;
+        color: #333;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            // 处理点击事件
+        }
+    }
+
+    states [
+        hover when is-hovered: {
+            root.background: #e0e0e0;
+        }
+        pressed when is-pressed: {
+            root.background: #d0d0d0;
+        }
+    ]
 }
 
 component FileTab inherits Rectangle {
     callback clicked();
+    callback close-clicked();
     in property <string> file-name;
     in property <bool> is-modified;
+    in property <bool> is-active;
 
-    width: 120px;
+    width: 150px;
     height: 30px;
-    background: lightgray;
+    background: is-active ? #d0d0d0 : #e0e0e0;
+    border-radius: 4px;
 
     HorizontalLayout {
+        padding: 5px;
+        spacing: 5px;
+
         Text {
             text: file-name + (is-modified ? "*" : "");
+            color: #333;
+            width: parent.width - 30px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 20px;
+            height: 20px;
+            background: #c0c0c0;
+            border-radius: 2px;
+
+            Text {
+                text: "×";
+                color: #666;
+                font-size: 14px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    TouchArea {
+        width: parent.width - 25px; // 排除关闭按钮的区域
+        height: parent.height;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    TouchArea {
+        x: parent.width - 25px;
+        width: 20px;
+        height: parent.height;
+        clicked => {
+            root.close-clicked();
+        }
+    }
+}
+
+component FileTreeItem inherits Rectangle {
+    callback clicked();
+    in property <string> name;
+    in property <int> indent;
+
+    height: 24px;
+
+    HorizontalLayout {
+        padding-left: indent * 10px;
+        spacing: 4px;
+
+        Text {
+            text: name;
+            color: #333;
+            vertical-alignment: center;
         }
     }
 
@@ -32,56 +123,83 @@ component FileTab inherits Rectangle {
     }
 }
 
+// export global Utils {
+//     pure function calculate-indent(file: string) -> int {
+//         return file.length - file.trim().length;
+//     }
+// }
+
 export global Callbacks {
     callback create_file(string);
     callback open_file(string);
+    callback close_file(string);
     callback save_file();
     callback update_content(string);
 }
 
 export component AppWindow inherits Window {
     title: "Nodian";
-    width: 1024px;
-    height: 768px;
+    preferred-width: 1024px;
+    preferred-height: 768px;
+    min-width: 800px;
+    min-height: 600px;
+    background: #ffffff;
 
     in property <[string]> file_tree: [];
     in property <[OpenFileData]> open_files: [];
-
     in property <string> preview_content: "";
+    in-out property <string> editor_content: "";
 
-    HorizontalBox {
-        VerticalBox {
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 10px;
+
+        Rectangle {
             width: 50px;
-            SidebarButton {
-                text: "📝";
-            }
+            background: #f5f5f5;
+            border-radius: 8px;
 
-            SidebarButton {
-                text: "📅";
-            }
+            VerticalLayout {
+                padding: 10px;
+                spacing: 10px;
+                alignment: start;
 
-            SidebarButton {
-                text: "🔧";
-            }
+                SidebarButton {
+                    icon: "M";
+                }
 
-            SidebarButton {
-                text: "⏱️";
-            }
+                SidebarButton {
+                    icon: "C";
+                }
 
-            SidebarButton {
-                text: "🔒";
-            }
+                SidebarButton {
+                    icon: "J";
+                }
 
-            SidebarButton {
-                text: "📋";
+                SidebarButton {
+                    icon: "T️";
+                }
+
+                SidebarButton {
+                    icon: "E";
+                }
+
+                SidebarButton {
+                    icon: "B";
+                }
             }
         }
 
-        VerticalBox {
-            HorizontalBox {
-                height: 30px;
+        VerticalLayout {
+            spacing: 10px;
+
+            HorizontalLayout {
+                height: 40px;
+                spacing: 10px;
+
                 LineEdit {
                     placeholder-text: "Enter file name";
+                    height: 30px;
                     edited => {
                         Callbacks.create_file(self.text);
                         self.text = "";
@@ -90,46 +208,69 @@ export component AppWindow inherits Window {
 
                 Button {
                     text: "Save";
+                    height: 30px;
                     clicked => {
                         Callbacks.save_file();
                     }
                 }
             }
 
-            HorizontalBox {
+            HorizontalLayout {
+                height: 30px;
+                spacing: 2px;
                 for file in open_files: FileTab {
                     file-name: file.path;
                     is-modified: file.is_modified;
+                    is-active: file.is_active;
                     clicked => {
                         Callbacks.open_file(file.path);
+                    }
+                    close-clicked => {
+                        Callbacks.close_file(file.path);
                     }
                 }
             }
 
-            HorizontalBox {
-                VerticalBox {
+            HorizontalLayout {
+                Rectangle {
                     width: 200px;
-                    for file in file_tree: Text {
-                        text: file;
-                        TouchArea {
-                            clicked => {
-                                Callbacks.open_file(file);
+                    background: #f5f5f5;
+                    border-radius: 4px;
+
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 5px;
+                            spacing: 2px;
+                            for file in file_tree: FileTreeItem {
+                                name: file;
+                                indent: 2;
+                                // indent: file.count(c => c == ' ') / 2;
+                                clicked => {
+                                    Callbacks.open_file(file);
+                                }
                             }
                         }
                     }
                 }
 
                 TextEdit {
+                    font-size: 14px;
+                    text: root.editor_content;
                     edited => {
+                        root.editor_content = self.text;
                         Callbacks.update_content(self.text);
                     }
                 }
 
                 Rectangle {
                     width: 50%;
-                    background: white;
+                    background: #f9f9f9;
+                    border-radius: 4px;
+
                     Text {
+                        padding: 10px;
                         text: root.preview_content;
+                        wrap: word-wrap;
                     }
                 }
             }

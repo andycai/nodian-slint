@@ -32,11 +32,17 @@ impl MarkdownEditor {
     }
 
     pub fn open_file(&mut self, path: &Path) -> Result<(), std::io::Error> {
-        let mut file = File::open(path)?;
+        let full_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.root_dir.join(path)
+        };
+        println!("Opening file: {:?}", full_path); // 添加日志
+        let mut file = File::open(&full_path)?;
         self.content.clear();
         file.read_to_string(&mut self.content)?;
-        self.current_file = Some(path.to_path_buf());
-        self.add_to_open_files(path);
+        self.current_file = Some(full_path.clone());
+        self.add_to_open_files(&full_path);
         Ok(())
     }
 
@@ -77,6 +83,10 @@ impl MarkdownEditor {
 
     pub fn get_open_files(&self) -> &[OpenFile] {
         &self.open_files
+    }
+
+    pub fn get_current_file(&self) -> Option<&PathBuf> {
+        self.current_file.as_ref()
     }
 
     fn walk_dir(&self, dir: &Path, files: &mut Vec<PathBuf>) {
@@ -124,5 +134,25 @@ impl MarkdownEditor {
             Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
             Err(_) => Vec::new(),
         }
+    }
+
+    pub fn close_file(&mut self, path: &str) -> Result<(), std::io::Error> {
+        let full_path = self.root_dir.join(path);
+        if let Some(index) = self.open_files.iter().position(|f| f.path == full_path) {
+            self.open_files.remove(index);
+            if self.current_file.as_ref() == Some(&full_path) {
+                self.current_file = None;
+                self.content.clear();
+            }
+            self.save_open_files();
+            Ok(())
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("File not open: {}", path)))
+        }
+    }
+
+    // 添加这个新方法
+    pub fn get_root_dir(&self) -> &Path {
+        &self.root_dir
     }
 }
