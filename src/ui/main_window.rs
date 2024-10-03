@@ -25,6 +25,7 @@ enum UIMessage {
     CloseFile(String),
     SaveFile,
     UpdateEditorContent(String),
+    UpdateEditorContentFromUI(String),
 }
 
 impl MainWindow {
@@ -66,10 +67,26 @@ impl MainWindow {
         });
 
         let tx_clone = tx.clone();
-        window.global::<Callbacks>().on_save_file(move || {
+        window.on_save_shortcut(move || {
             let tx = tx_clone.clone();
             tokio::spawn(async move {
                 tx.send(UIMessage::SaveFile).await.unwrap();
+            });
+        });
+
+        // let window_weak = window.as_weak();
+        // window.on_get_editor_content(move || {
+        //     window_weak.upgrade_in_event_loop(|handle| {
+        //         handle.get_editor_content()
+        //     }).unwrap_or_default()
+        // });
+
+        let tx_clone = tx.clone();
+        window.global::<Callbacks>().on_update_editor_content(move |content: SharedString| {
+            let tx = tx_clone.clone();
+            let content = content.to_string();
+            tokio::spawn(async move {
+                tx.send(UIMessage::UpdateEditorContentFromUI(content)).await.unwrap();
             });
         });
 
@@ -118,13 +135,13 @@ impl MainWindow {
             open_files.iter().map(|f| OpenFileData {
                 path: f.path.to_string_lossy().to_string().into(),
                 is_modified: f.is_modified,
-                is_active: current_file.map(|cf| cf == f.path.as_path()).unwrap_or(false),
+                is_active: current_file.as_ref().map(|cf| cf == &f.path).unwrap_or(false),
             }).collect::<Vec<OpenFileData>>()
         };
         tx.send(UIMessage::UpdateOpenFiles(open_files_data)).await.unwrap();
 
         while let Some(msg) = rx.recv().await {
-            let window = window.clone(); // Clone the Weak<AppWindow> here
+            let window = window.clone();
             match msg {
                 UIMessage::UpdateFileTree(files) => {
                     let files_clone = files.clone();
@@ -165,6 +182,7 @@ impl MainWindow {
                         Path::new("nodian").join(&path)
                     };
                     println!("Full path: {:?}", full_path);
+                    
                     let content = {
                         let mut editor = markdown_editor.lock().unwrap();
                         match editor.open_file(&full_path) {
@@ -178,23 +196,12 @@ impl MainWindow {
                             }
                         }
                     };
-                    
-                    // Update the text edit with the file content
+
+                    // Update UI outside of the lock
                     let content_clone = content.clone();
                     window.upgrade_in_event_loop(move |handle| {
                         handle.set_editor_content(content_clone.into());
-                        // println!("Editor content updated: {}", content_clone);
-                        // Force UI update
-                        handle.window().request_redraw();
                     }).ok();
-                    
-                    // 添加一个小延迟后再次触发 UI 更新
-                    tokio::spawn(async move {
-                        sleep(Duration::from_millis(50)).await;
-                        window.upgrade_in_event_loop(|handle| {
-                            handle.window().request_redraw();
-                        }).ok();
-                    });
                     
                     // Update preview
                     let parser = Parser::new(&content);
@@ -203,7 +210,7 @@ impl MainWindow {
                     tx.send(UIMessage::UpdatePreview(html_output)).await.unwrap();
 
                     // Send a message to update open files
-                    let open_files_data: Vec<OpenFileData> = {
+                    let open_files_data = {
                         let editor = markdown_editor.lock().unwrap();
                         let open_files = editor.get_open_files();
                         let current_file = editor.get_current_file();
@@ -214,20 +221,118 @@ impl MainWindow {
                                 .to_string()
                                 .into(),
                             is_modified: f.is_modified,
-                            is_active: current_file.map(|cf| cf == f.path.as_path()).unwrap_or(false),
-                        }).collect()
+                            is_active: current_file.as_ref().map(|cf| cf == f.path.as_path()).unwrap_or(false),
+                        }).collect::<Vec<OpenFileData>>()
                     };
                     tx.send(UIMessage::UpdateOpenFiles(open_files_data)).await.unwrap();
                 },
                 UIMessage::CloseFile(path) => {
-                    println!("Attempting to close file: {}", path); // 添加这行
-                    let relative_path = Path::new(&path).strip_prefix("nodian").unwrap_or(Path::new(&path));
-                    if let Err(e) = markdown_editor.lock().unwrap().close_file(relative_path.to_str().unwrap()) {
-                        eprintln!("Failed to close file: {}", e);
-                    } else {
-                        println!("File closed successfully: {}", path); // 添加这行
+                    println!("Attempting to close file: {}", path);
+                    let result = markdown_editor.lock().unwrap().close_file(&path);
+                    match result {
+                        Ok(()) => {
+                            println!("File closed successfully: {}", path);
+                            
+                            // Send a message to update open files
+                            let open_files_data: Vec<OpenFileData> = {
+                                let editor = markdown_editor.lock().unwrap();
+                                let open_files = editor.get_open_files();
+                                let current_file = editor.get_current_file();
+                                open_files.iter().map(|f| OpenFileData {
+                                    path: f.path.strip_prefix(&editor.get_root_dir())
+                                        .unwrap_or(&f.path)
+                                        .to_string_lossy()
+                                        .to_string()
+                                        .into(),
+                                    is_modified: f.is_modified,
+                                    is_active: current_file.as_ref().map(|cf| cf == f.path.as_path()).unwrap_or(false),
+                                }).collect()
+                            };
+                            tx.send(UIMessage::UpdateOpenFiles(open_files_data)).await.unwrap();
+                            
+                            // Update the file tree
+                            if let Ok(files) = Self::load_directory_tree(Path::new("nodian")) {
+                                tx.send(UIMessage::UpdateFileTree(files)).await.unwrap();
+                            }
+
+                            // Clear editor content if the closed file was the current file
+                            if markdown_editor.lock().unwrap().get_current_file().is_none() {
+                                window.upgrade_in_event_loop(|handle| {
+                                    handle.set_editor_content("".into());
+                                    handle.set_preview_content("".into());
+                                }).ok();
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("Failed to close file: {}", e);
+                        }
                     }
-                    // Send a message to update open files
+                },
+                UIMessage::SaveFile => {
+                    println!("Save file command received");
+
+                    // let content = window.upgrade_in_event_loop(|handle| {
+                    //     handle.get_editor_content()
+                    // }).unwrap_or_default();
+
+                    // let result = {
+                    //     let mut editor = markdown_editor.lock().unwrap();
+                    //     editor.update_content(content.to_string());
+                    //     editor.save_file()
+                    // };
+                    
+                    let content = {
+                        let editor = markdown_editor.lock().unwrap();
+                        editor.get_content().to_string()
+                    };
+
+                    let result = {
+                        let mut editor = markdown_editor.lock().unwrap();
+                        editor.save_file()
+                    };
+
+                    match result {
+                        Ok(()) => {
+                            println!("File saved successfully");
+                            // 更新打开文件的状态
+                            let open_files_data: Vec<OpenFileData> = {
+                                let editor = markdown_editor.lock().unwrap();
+                                let open_files = editor.get_open_files();
+                                let current_file = editor.get_current_file();
+                                open_files.iter().map(|f| OpenFileData {
+                                    path: f.path.strip_prefix(&editor.get_root_dir())
+                                        .unwrap_or(&f.path)
+                                        .to_string_lossy()
+                                        .to_string()
+                                        .into(),
+                                    is_modified: f.is_modified,
+                                    is_active: current_file.as_ref().map(|cf| cf == f.path.as_path()).unwrap_or(false),
+                                }).collect()
+                            };
+                            tx.send(UIMessage::UpdateOpenFiles(open_files_data)).await.unwrap();
+
+                            // 更新 UI 以反映文件已保存
+                            window.upgrade_in_event_loop(|handle| {
+                                handle.window().request_redraw();
+                            }).ok();
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to save file: {}", e);
+                            // 可以在这里添加错误提示的 UI 更新
+                        }
+                    }
+                },
+                UIMessage::UpdateEditorContent(content) => {
+                    println!("Updating editor content, length: {}", content.len());
+                    {
+                        let mut editor = markdown_editor.lock().unwrap();
+                        editor.update_content(content.clone());
+                    }
+                    window.upgrade_in_event_loop(move |handle| {
+                        handle.set_editor_content(content.into());
+                    }).ok();
+
+                    // 更新打开文件的状态
                     let open_files_data: Vec<OpenFileData> = {
                         let editor = markdown_editor.lock().unwrap();
                         let open_files = editor.get_open_files();
@@ -239,26 +344,37 @@ impl MainWindow {
                                 .to_string()
                                 .into(),
                             is_modified: f.is_modified,
-                            is_active: current_file.map(|cf| cf == f.path.as_path()).unwrap_or(false),
+                            is_active: current_file.as_ref().map(|cf| cf == f.path.as_path()).unwrap_or(false),
                         }).collect()
                     };
                     tx.send(UIMessage::UpdateOpenFiles(open_files_data)).await.unwrap();
-                    
-                    // Update the file tree
-                    if let Ok(files) = Self::load_directory_tree(Path::new("nodian")) {
-                        tx.send(UIMessage::UpdateFileTree(files)).await.unwrap();
-                    }
                 },
-                UIMessage::SaveFile => {
-                    if let Err(e) = markdown_editor.lock().unwrap().save_file() {
-                        eprintln!("Failed to save file: {}", e);
+                UIMessage::UpdateEditorContentFromUI(content) => {
+                    {
+                        let mut editor = markdown_editor.lock().unwrap();
+                        editor.update_content(content.clone());
                     }
-                },
-                UIMessage::UpdateEditorContent(content) => {
-                    let content_clone = content.clone();
-                    window.upgrade_in_event_loop(move |handle| {
-                        handle.set_editor_content(content_clone.into());
-                    }).ok();
+
+                    // 更新预览
+                    let parser = Parser::new(&content);
+                    let mut html_output = String::new();
+                    html::push_html(&mut html_output, parser);
+                    tx.send(UIMessage::UpdatePreview(html_output)).await.unwrap();
+
+                    // 更新打开文件的状态
+                    let open_files_data = {
+                        let editor = markdown_editor.lock().unwrap();
+                        editor.get_open_files().iter().map(|f| OpenFileData {
+                            path: f.path.strip_prefix(&editor.get_root_dir())
+                                .unwrap_or(&f.path)
+                                .to_string_lossy()
+                                .to_string()
+                                .into(),
+                            is_modified: f.is_modified,
+                            is_active: editor.get_current_file().as_ref().map(|cf| cf == f.path.as_path()).unwrap_or(false),
+                        }).collect::<Vec<OpenFileData>>()
+                    };
+                    tx.send(UIMessage::UpdateOpenFiles(open_files_data)).await.unwrap();
                 },
             }
         }

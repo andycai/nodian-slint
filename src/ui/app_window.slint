@@ -135,6 +135,7 @@ export global Callbacks {
     callback close_file(string);
     callback save_file();
     callback update_content(string);
+    callback update_editor_content(string);
 }
 
 export component AppWindow inherits Window {
@@ -149,6 +150,8 @@ export component AppWindow inherits Window {
     in property <[OpenFileData]> open_files: [];
     in property <string> preview_content: "";
     in-out property <string> editor_content: "";
+
+    callback get_editor_content() -> string;
 
     HorizontalLayout {
         padding: 10px;
@@ -233,7 +236,7 @@ export component AppWindow inherits Window {
 
             HorizontalLayout {
                 Rectangle {
-                    width: 200px;
+                    width: 180px;
                     background: #f5f5f5;
                     border-radius: 4px;
 
@@ -254,16 +257,18 @@ export component AppWindow inherits Window {
                 }
 
                 TextEdit {
+                    width: 300px;
                     font-size: 14px;
                     text: root.editor_content;
                     edited => {
                         root.editor_content = self.text;
+                        Callbacks.update_editor_content(self.text);
                         Callbacks.update_content(self.text);
                     }
                 }
 
                 Rectangle {
-                    width: 50%;
+                    width: 300px;
                     background: #f9f9f9;
                     border-radius: 4px;
 
@@ -274,6 +279,20 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+        }
+    }
+
+    callback save-shortcut();
+
+    forward-focus: key-handler;
+
+    key-handler := FocusScope {
+        key-pressed(event) => {
+            if (event.text == "s" && (event.modifiers.control || event.modifiers.meta)) {
+                root.save-shortcut();
+                return accept;
+            }
+            return reject;
         }
     }
 }
