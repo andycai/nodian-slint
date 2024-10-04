@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::io;
 use parking_lot::Mutex;
+use pulldown_cmark::{Parser, Event, Tag};
 
 pub struct MarkdownEditor {
     current_file: Mutex<Option<PathBuf>>,
@@ -119,6 +120,46 @@ impl MarkdownEditor {
             }
         }
         println!("Content updated, length: {}", self.content.lock().len());
+    }
+
+    pub fn markdown_to_rich_text(markdown: &str) -> String {
+        let parser = Parser::new(markdown);
+        let mut rich_text = String::new();
+        let mut list_level = 0;
+
+        for event in parser {
+            match event {
+                Event::Start(Tag::Paragraph) => rich_text.push_str("<p>"),
+                Event::End(Tag::Paragraph) => rich_text.push_str("</p>\n"),
+                Event::Start(Tag::Heading(level, _, _)) => rich_text.push_str(&format!("<h{}>", level)),
+                Event::End(Tag::Heading(level, _, _)) => rich_text.push_str(&format!("</h{}>\n", level)),
+                Event::Start(Tag::List(..)) => {
+                    list_level += 1;
+                    rich_text.push_str("<ul>")
+                },
+                Event::End(Tag::List(..)) => {
+                    list_level -= 1;
+                    rich_text.push_str("</ul>")
+                },
+                Event::Start(Tag::Item) => rich_text.push_str(&format!("{}<li>", "  ".repeat(list_level))),
+                Event::End(Tag::Item) => rich_text.push_str("</li>\n"),
+                Event::Start(Tag::Emphasis) => rich_text.push_str("<i>"),
+                Event::End(Tag::Emphasis) => rich_text.push_str("</i>"),
+                Event::Start(Tag::Strong) => rich_text.push_str("<b>"),
+                Event::End(Tag::Strong) => rich_text.push_str("</b>"),
+                Event::Code(code) => rich_text.push_str(&format!("<code>{}</code>", code)),
+                Event::Text(text) => rich_text.push_str(&text),
+                Event::SoftBreak => rich_text.push('\n'),
+                Event::HardBreak => rich_text.push_str("<br>"),
+                _ => {}
+            }
+        }
+
+        rich_text
+    }
+
+    pub fn update_preview(&self) -> String {
+        Self::markdown_to_rich_text(&self.content.lock())
     }
 }
 

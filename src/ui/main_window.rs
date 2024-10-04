@@ -7,7 +7,6 @@ use pulldown_cmark::{Parser, html};
 use crate::ui::{AppWindow, Callbacks, OpenFileData};
 use std::path::{PathBuf, Path};
 use std::fs;
-use std::borrow::Cow;
 use tokio::time::{sleep, Duration};
 
 pub struct MainWindow {
@@ -53,6 +52,14 @@ impl MainWindow {
             println!("on_open_file called with path: {}", path); // 保留这行调试输出
             tokio::spawn(async move {
                 tx.send(UIMessage::OpenFile(path)).await.unwrap();
+            });
+        });
+
+        let tx_clone = tx.clone();
+        window.global::<Callbacks>().on_save_file(move || {
+            let tx = tx_clone.clone();
+            tokio::spawn(async move {
+                tx.send(UIMessage::SaveFile).await.unwrap();
             });
         });
 
@@ -175,19 +182,19 @@ impl MainWindow {
                     }
                 },
                 UIMessage::OpenFile(path) => {
-                    println!("Attempting to open file: {}", path);
+                    // println!("Attempting to open file: {}", path);
                     let full_path = if Path::new(&path).is_absolute() {
                         PathBuf::from(&path)
                     } else {
                         Path::new("nodian").join(&path)
                     };
-                    println!("Full path: {:?}", full_path);
+                    // println!("Full path: {:?}", full_path);
                     
                     let content = {
                         let mut editor = markdown_editor.lock().unwrap();
                         match editor.open_file(&full_path) {
                             Ok(()) => {
-                                println!("File opened successfully");
+                                // println!("File opened successfully");
                                 editor.get_content().to_string()
                             },
                             Err(e) => {
@@ -269,18 +276,8 @@ impl MainWindow {
                     }
                 },
                 UIMessage::SaveFile => {
-                    println!("Save file command received");
+                    // println!("Save file command received");
 
-                    // let content = window.upgrade_in_event_loop(|handle| {
-                    //     handle.get_editor_content()
-                    // }).unwrap_or_default();
-
-                    // let result = {
-                    //     let mut editor = markdown_editor.lock().unwrap();
-                    //     editor.update_content(content.to_string());
-                    //     editor.save_file()
-                    // };
-                    
                     let content = {
                         let editor = markdown_editor.lock().unwrap();
                         editor.get_content().to_string()
@@ -323,7 +320,7 @@ impl MainWindow {
                     }
                 },
                 UIMessage::UpdateEditorContent(content) => {
-                    println!("Updating editor content, length: {}", content.len());
+                    // println!("Updating editor content, length: {}", content.len());
                     {
                         let mut editor = markdown_editor.lock().unwrap();
                         editor.update_content(content.clone());
