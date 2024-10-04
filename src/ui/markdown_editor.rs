@@ -14,6 +14,7 @@ pub struct MarkdownEditor {
 #[derive(Clone)]
 pub struct OpenFile {
     pub path: PathBuf,
+    pub is_dir: bool,
     pub is_modified: bool,
 }
 
@@ -41,6 +42,7 @@ impl MarkdownEditor {
         *self.content.lock() = content;
         self.open_files.lock().push(OpenFile {
             path: path.to_path_buf(),
+            is_dir: path.is_dir(),
             is_modified: false,
         });
         Ok(())

@@ -1,0 +1,34 @@
+export component SidebarButton inherits Rectangle {
+    width: 40px;
+    height: 40px;
+    background: #f0f0f0;
+    border-radius: 0px;
+
+    in property <string> icon;
+    property <bool> is-hovered: false;
+    property <bool> is-pressed: false;
+
+    Text {
+        text: root.icon;
+        font-size: 18px;
+        color: #333;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            // 处理点击事件
+        }
+    }
+
+    states [
+        hover when is-hovered: {
+            root.background: #e0e0e0;
+        }
+        pressed when is-pressed: {
+            root.background: #d0d0d0;
+        }
+    ]
+}

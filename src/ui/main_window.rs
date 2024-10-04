@@ -4,7 +4,9 @@ use std::rc::Rc;
 use tokio::sync::mpsc;
 use crate::ui::markdown_editor::MarkdownEditor;
 use pulldown_cmark::{Parser, html};
-use crate::ui::{AppWindow, Callbacks, OpenFileData};
+use crate::ui::AppWindow;
+use crate::ui::Callbacks;
+use crate::ui::OpenFileData;
 use std::path::{PathBuf, Path};
 use std::fs;
 use tokio::time::{sleep, Duration};
@@ -109,17 +111,17 @@ impl MainWindow {
     }
 
     pub async fn run(&self) -> Result<(), slint::PlatformError> {
-        println!("Updating file tree");
+        // println!("Updating file tree");
         self.tx.send(UIMessage::UpdateFileTree(Vec::new())).await.unwrap();
-        println!("Updating open files");
+        // println!("Updating open files");
         self.tx.send(UIMessage::UpdateOpenFiles(Vec::new())).await.unwrap();
-        println!("Attempting to show window");
+        // println!("Attempting to show window");
         
         self.window.show()?;
-        println!("Window shown, starting event loop");
+        // println!("Window shown, starting event loop");
         slint::run_event_loop()?;
         
-        println!("Event loop finished");
+        // println!("Event loop finished");
         Ok(())
     }
 
@@ -141,6 +143,7 @@ impl MainWindow {
             let current_file = editor.get_current_file();
             open_files.iter().map(|f| OpenFileData {
                 path: f.path.to_string_lossy().to_string().into(),
+                is_dir: f.is_dir,
                 is_modified: f.is_modified,
                 is_active: current_file.as_ref().map(|cf| cf == &f.path).unwrap_or(false),
             }).collect::<Vec<OpenFileData>>()
@@ -227,6 +230,7 @@ impl MainWindow {
                                 .to_string_lossy()
                                 .to_string()
                                 .into(),
+                            is_dir: f.is_dir,
                             is_modified: f.is_modified,
                             is_active: current_file.as_ref().map(|cf| cf == f.path.as_path()).unwrap_or(false),
                         }).collect::<Vec<OpenFileData>>()
@@ -234,11 +238,11 @@ impl MainWindow {
                     tx.send(UIMessage::UpdateOpenFiles(open_files_data)).await.unwrap();
                 },
                 UIMessage::CloseFile(path) => {
-                    println!("Attempting to close file: {}", path);
+                    // println!("Attempting to close file: {}", path);
                     let result = markdown_editor.lock().unwrap().close_file(&path);
                     match result {
                         Ok(()) => {
-                            println!("File closed successfully: {}", path);
+                            // println!("File closed successfully: {}", path);
                             
                             // Send a message to update open files
                             let open_files_data: Vec<OpenFileData> = {
@@ -251,6 +255,7 @@ impl MainWindow {
                                         .to_string_lossy()
                                         .to_string()
                                         .into(),
+                                    is_dir: f.is_dir,
                                     is_modified: f.is_modified,
                                     is_active: current_file.as_ref().map(|cf| cf == f.path.as_path()).unwrap_or(false),
                                 }).collect()
@@ -302,6 +307,7 @@ impl MainWindow {
                                         .to_string_lossy()
                                         .to_string()
                                         .into(),
+                                    is_dir: f.is_dir,
                                     is_modified: f.is_modified,
                                     is_active: current_file.as_ref().map(|cf| cf == f.path.as_path()).unwrap_or(false),
                                 }).collect()
@@ -340,6 +346,7 @@ impl MainWindow {
                                 .to_string_lossy()
                                 .to_string()
                                 .into(),
+                            is_dir: f.is_dir,
                             is_modified: f.is_modified,
                             is_active: current_file.as_ref().map(|cf| cf == f.path.as_path()).unwrap_or(false),
                         }).collect()
@@ -367,6 +374,7 @@ impl MainWindow {
                                 .to_string_lossy()
                                 .to_string()
                                 .into(),
+                            is_dir: f.is_dir,
                             is_modified: f.is_modified,
                             is_active: editor.get_current_file().as_ref().map(|cf| cf == f.path.as_path()).unwrap_or(false),
                         }).collect::<Vec<OpenFileData>>()
@@ -383,6 +391,7 @@ impl MainWindow {
             fs::create_dir_all(root)?;
         }
         Self::load_directory_tree_recursive(root, &mut result, 0)?;
+        println!("{:?}", result.clone());
         Ok(result)
     }
 

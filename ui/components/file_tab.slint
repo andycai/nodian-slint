@@ -1,0 +1,55 @@
+export component FileTab inherits Rectangle {
+    callback clicked();
+    callback close-clicked();
+    in property <string> file-name;
+    in property <bool> is-modified;
+    in property <bool> is-active;
+
+    width: 120px;
+    height: 26px;
+    background: is-active ? #d0d0d0 : #e0e0e0;
+    border-radius: 0px;
+    HorizontalLayout {
+        padding-left: 4px;
+        spacing: 0px;
+
+        Text {
+            text: file-name + (is-modified ? "*" : "");
+            color: #333;
+            width: parent.width - 30px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 20px;
+            height: 20px;
+            // background: #c0c0c0;
+            border-radius: 0px;
+
+            Text {
+                text: "×";
+                color: #666;
+                font-size: 18px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    TouchArea {
+        width: parent.width - 25px; // 排除关闭按钮的区域
+        height: parent.height;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    TouchArea {
+        x: parent.width - 25px;
+        width: 20px;
+        height: parent.height;
+        clicked => {
+            root.close-clicked();
+        }
+    }
+}

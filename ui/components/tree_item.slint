@@ -1,0 +1,24 @@
+export component TreeItem inherits Rectangle {
+    callback clicked();
+    in property <string> name;
+    in property <int> indent;
+
+    height: 20px;
+
+    HorizontalLayout {
+        padding-left: indent * 4px;
+        spacing: 2px;
+
+        Text {
+            text: name;
+            color: #333;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
