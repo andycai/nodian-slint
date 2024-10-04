@@ -1,5 +1,4 @@
 mod ui;
-mod features;
 mod db;
 
 use ui::MainWindow;

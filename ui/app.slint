@@ -1,4 +1,5 @@
 import { Button, VerticalBox, HorizontalBox, GroupBox, LineEdit, TextEdit, ScrollView } from "std-widgets.slint";
+import { Icons } from "style/app.slint";
 
 export struct OpenFileData {
     path: string,
@@ -162,32 +163,32 @@ export component AppWindow inherits Window {
             border-radius: 0px;
 
             VerticalLayout {
-                padding: 0px;
-                spacing: 1px;
+                padding: 3px;
+                spacing: 2px;
                 alignment: start;
 
-                SidebarButton {
-                    icon: "M";
+                Button {
+                    width: 32px;
+                    height: 32px;
+                    icon: Icons.editor;
+                    clicked => {
+                    }
                 }
 
-                SidebarButton {
-                    icon: "C";
+                Button {
+                    width: 32px;
+                    height: 32px;
+                    icon: Icons.calendar;
+                    clicked => {
+                    }
                 }
 
-                SidebarButton {
-                    icon: "J";
-                }
-
-                SidebarButton {
-                    icon: "T️";
-                }
-
-                SidebarButton {
-                    icon: "E";
-                }
-
-                SidebarButton {
-                    icon: "B";
+                Button {
+                    width: 32px;
+                    height: 32px;
+                    icon: Icons.json;
+                    clicked => {
+                    }
                 }
             }
         }

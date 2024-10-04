@@ -2,7 +2,7 @@ use slint::{self, ComponentHandle, Model, ModelRc, SharedString, Weak, VecModel}
 use std::sync::{Arc, Mutex};
 use std::rc::Rc;
 use tokio::sync::mpsc;
-use crate::features::markdown_editor::MarkdownEditor;
+use crate::ui::markdown_editor::MarkdownEditor;
 use pulldown_cmark::{Parser, html};
 use crate::ui::{AppWindow, Callbacks, OpenFileData};
 use std::path::{PathBuf, Path};
